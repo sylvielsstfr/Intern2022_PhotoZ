@@ -1,0 +1,16 @@
+jupyter
+jupyterlab
+numpy
+astropy
+sphinx
+matplotlib
+pandas
+scipy
+scikit-learn
+dill
+yml
+pyyaml
+pip
+corner
+tables-io
+qp@git+https://github.com/LSSTDESC/qp
