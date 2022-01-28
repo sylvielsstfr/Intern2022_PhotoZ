@@ -1,15 +1,15 @@
 
 import sys
-#from mpi4py import MPI
+from mpi4py import MPI
 import numpy as np
 from delight.io import *
 from delight.utils import *
 from delight.photoz_gp import PhotozGP
 from delight.photoz_kernels import Photoz_mean_function, Photoz_kernel
 
-#comm = MPI.COMM_WORLD
-threadNum = 0
-numThreads = 1
+comm = MPI.COMM_WORLD
+threadNum = comm.Get_rank()
+numThreads = comm.Get_size()
 
 # Parse parameters file
 if len(sys.argv) < 2:
@@ -32,7 +32,7 @@ firstLine = int(threadNum * numObjectsTraining / numThreads)
 lastLine = int(min(numObjectsTraining,
                (threadNum + 1) * numObjectsTraining / numThreads))
 numLines = lastLine - firstLine
-#comm.Barrier()
+comm.Barrier()
 print('Thread ', threadNum, ' analyzes lines ', firstLine, ' to ', lastLine)
 
 DL = approx_DL()
@@ -78,9 +78,6 @@ for z, normedRefFlux,\
     ell = ellMLs[0, bestType]
     X[:, 2] = ell
 
-    if loc%10 == 0:
-        msg=f"loc={loc} , bestType={bestType} , ell={ell}"
-
     gp.setData(X, Y, Yvar, bestType)
     lB = bands.size
     localData[loc, 0] = lB
@@ -101,7 +98,7 @@ for z, normedRefFlux,\
 
 
 # use MPI to get the totals
-#comm.Barrier()
+comm.Barrier()
 if threadNum == 0:
     reducedData = np.zeros((numObjectsTraining, numCol))
 else:
@@ -109,9 +106,8 @@ else:
 
 if crossValidate:
     chi2sGlobal = np.zeros_like(chi2sLocal)
-    #comm.Allreduce(chi2sLocal, chi2sGlobal, op=MPI.SUM)
-    chi2sGlobal = chi2sLocal
-    #comm.Barrier()
+    comm.Allreduce(chi2sLocal, chi2sGlobal, op=MPI.SUM)
+    comm.Barrier()
 
 firstLines = [int(k*numObjectsTraining/numThreads)
               for k in range(numThreads)]
@@ -122,9 +118,8 @@ sendcounts = tuple([(lastLines[k] - firstLines[k]) * numCol
 displacements = tuple([firstLines[k] * numCol
                        for k in range(numThreads)])
 
-#comm.Gatherv(localData, [reducedData, sendcounts, displacements, MPI.DOUBLE])
-reducedData = localData
-#comm.Barrier()
+comm.Gatherv(localData, [reducedData, sendcounts, displacements, MPI.DOUBLE])
+comm.Barrier()
 
 if threadNum == 0:
     np.savetxt(params['training_paramFile'], reducedData, fmt=fmt)
