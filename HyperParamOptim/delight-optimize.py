@@ -1,4 +1,3 @@
-
 import sys
 #from mpi4py import MPI
 import numpy as np
@@ -17,7 +16,8 @@ import coloredlogs
 import os
 
 # Plot formatting
-plt.rcParams["figure.figsize"] = (12,6)
+plt.rcParams["figure.figsize"] = (8,6)
+#plt.rcParams["figure.tight_layout"] = True
 plt.rcParams["axes.labelsize"] = 'xx-large'
 plt.rcParams['axes.titlesize'] = 'xx-large'
 plt.rcParams['xtick.labelsize']= 'xx-large'
@@ -58,20 +58,30 @@ numObjectsTraining = np.sum(1 for line in open(params['training_catFile']))
 numObjectsTarget = np.sum(1 for line in open(params['target_catFile']))
 print('Number of Training Objects', numObjectsTraining)
 print('Number of Target Objects', numObjectsTarget)
-ellInd=0
-for ellPriorSigma in [1.0]: #, 10.0]:
+
+ellPriorSigmaList = np.logspace( 0, 6, 7 )
+lenSigList = len(ellPriorSigmaList)
+ellInd = -1
+
+for ellPriorSigma in [1000]: #ellPriorSigmaList:
+    print("ellPriorSigma = {}".format(ellPriorSigma))
+    ellInd += 1
     alpha_C = 1e3
     alpha_L = 1e2
     V_C, V_L = 1.0, 1.0
     allVc = []
     allZ = []
     allMargLike = []
+    allAlphaC = []
+    allAlphaL = []
+    allVl = []
     gp = PhotozGP(
         f_mod,
         bandCoefAmplitudes, bandCoefPositions, bandCoefWidths,
         params['lines_pos'], params['lines_width'],
         V_C, V_L, alpha_C, alpha_L,
         redshiftGridGP, use_interpolators=True)
+    print("Initialisation du GP pour var_C = {}, alpha_C = {}".format(gp.kernel.var_C, gp.kernel.alpha_C))
 
     for extraFracFluxError in [1e-2]:
         redshifts = np.zeros((numObjectsTraining, ))
@@ -82,69 +92,135 @@ for ellPriorSigma in [1.0]: #, 10.0]:
         # params['training_extraFracFluxError'] = extraFracFluxError
         params['target_extraFracFluxError'] = extraFracFluxError
 
-
         loc = -1
-        trainingDataIter = getDataFromFile(
-            params, 0, numObjectsTraining,
-            prefix="training_", getXY=True)
-        for z, normedRefFlux, bands, fluxes,\
-            fluxesVar, bCV, fCV, fvCV, X, Y, Yvar\
-                in trainingDataIter:
-            marginalLikelihoods = []
+        trainingDataIter = getDataFromFile(params, 0, numObjectsTraining, prefix="training_", getXY=True)
+        for z, normedRefFlux, bands, fluxes, fluxesVar, bCV, fCV, fvCV, X, Y, Yvar in trainingDataIter:
             loc += 1
             redshifts[loc] = z
             # print( "z = {},\nbands = {},\nfluxes = {}".format(z, bands, fluxes) )
+            
             themod = np.zeros((1, f_mod_grid.shape[1], bands.size))
             for it in range(f_mod_grid.shape[1]):
                 for ib, band in enumerate(bands):
-                    themod[0, it, ib] = np.interp(z, redshiftGrid,
-                                                      f_mod_grid[:, it, band])
-            chi2_grid, theellMLs = scalefree_flux_likelihood(
-                fluxes,
-                fluxesVar,
-                themod,
-                returnChi2=True
-            )
+                    themod[0, it, ib] = np.interp(z, redshiftGrid, f_mod_grid[:, it, band])
+            
+            chi2_grid, theellMLs = scalefree_flux_likelihood(fluxes, fluxesVar, themod, returnChi2=True)
+            
             bestTypes[loc] = np.argmin(chi2_grid)
+            #distribué uniformément?
             ellMLs[loc] = theellMLs[0, bestTypes[loc]]
+            #autour de 1e6 car facteur dans la génération des flux
+            
             X[:, 2] = ellMLs[loc]
-            for V_C in np.logspace( -1, 4, 10 ):
-                gp.var_C = V_C
-                gp.var_L = V_L
+
+            for V_C in np.linspace( 0.1, 1e4, 100 ):
+                #print("Création du GP pour z = {}, V_C = {}".format(z, V_C))
+                #gp.mean_fct = Photoz_linear_sed_basis(f_mod)
+                #gp.kernel = Photoz_kernel(bandCoefAmplitudes, bandCoefPositions, bandCoefWidths, params['lines_pos'], params['lines_width'], V_C, V_L, alpha_C, alpha_L, redshiftGrid=redshiftGridGP, use_interpolators=True)
+                #gp = PhotozGP(f_mod, bandCoefAmplitudes, bandCoefPositions, bandCoefWidths, params['lines_pos'], params['lines_width'], V_C, V_L, alpha_C, alpha_L, redshiftGridGP, use_interpolators=True)
+                gp.kernel.use_interpolators=False
+                gp.kernel.var_C = V_C
+                #gp.kernel.update_kernelparts(X)
                 gp.setData(X, Y, Yvar, bestTypes[loc])
-                model_mean[:, loc, :], model_covar[:, loc, :] =\
-                    gp.predictAndInterpolate(redshiftGrid, ell=ellMLs[loc])
-                marginalLikelihood = np.abs( gp.margLike() )
-                #print( "Data Iteration = {},\n V_C = {},\n Marginal Likelihood = {}".format( loc, gp.var_C, marginalLikelihood ) )
-                allVc.append(V_C)
+                marginalLikelihood = gp.margLike()
+                #print("GP créé. Marginal Likelihood = {}".format(marginalLikelihood))
                 allZ.append(z)
-                allMargLike.append( marginalLikelihood )
+                allMargLike.append(marginalLikelihood)
+                allVc.append(V_C)
+
+            # ~ for V_L in np.linspace( 0.1, 1e4, 100 ):
+                # ~ #print("Création du GP pour z = {}, V_L = {}".format(z, V_L))
+                # ~ #gp.mean_fct = Photoz_linear_sed_basis(f_mod)
+                # ~ #gp.kernel = Photoz_kernel(bandCoefAmplitudes, bandCoefPositions, bandCoefWidths, params['lines_pos'], params['lines_width'], V_C, V_L, alpha_C, alpha_L, redshiftGrid=redshiftGridGP, use_interpolators=True)
+                # ~ #gp = PhotozGP(f_mod, bandCoefAmplitudes, bandCoefPositions, bandCoefWidths, params['lines_pos'], params['lines_width'], V_C, V_L, alpha_C, alpha_L, redshiftGridGP, use_interpolators=True)
+                # ~ gp.kernel.use_interpolators=False
+                # ~ gp.kernel.var_L = V_L
+                # ~ gp.kernel.update_kernelparts(X)
+                # ~ gp.setData(X, Y, Yvar, bestTypes[loc])
+                # ~ marginalLikelihood = gp.margLike()
+                # ~ #print("GP créé. Marginal Likelihood = {}".format(marginalLikelihood))
+                # ~ allZ.append(z)
+                # ~ allMargLike.append(marginalLikelihood)
+                # ~ allVl.append(V_L)
+
+            # ~ for alpha_C in np.linspace( 0.1, 1e4, 100 ):
+                # ~ #print("Création du GP pour z = {}, alpha_C = {}".format(z, alpha_C))
+                # ~ #gp.mean_fct = Photoz_linear_sed_basis(f_mod)
+                # ~ #gp.kernel = Photoz_kernel(bandCoefAmplitudes, bandCoefPositions, bandCoefWidths, params['lines_pos'], params['lines_width'], V_C, V_L, alpha_C, alpha_L, redshiftGrid=redshiftGridGP, use_interpolators=True)
+                # ~ #gp = PhotozGP(f_mod, bandCoefAmplitudes, bandCoefPositions, bandCoefWidths, params['lines_pos'], params['lines_width'], V_C, V_L, alpha_C, alpha_L, redshiftGridGP, use_interpolators=True)
+                # ~ gp.kernel.use_interpolators=False
+                # ~ gp.kernel.alpha_C = alpha_C
+                # ~ #gp.kernel.update_kernelparts(X)
+                # ~ gp.setData(X, Y, Yvar, bestTypes[loc])
+                # ~ marginalLikelihood = gp.margLike()
+                # ~ #print("GP créé. Marginal Likelihood = {}".format(marginalLikelihood))
+                # ~ allZ.append(z)
+                # ~ allMargLike.append(marginalLikelihood)
+                # ~ allAlphaC.append(alpha_C)
+
+            # ~ for alpha_L in np.linspace( 0.1, 1e4, 100 ):
+                # ~ #print("Création du GP pour z = {}, alpha_L = {}".format(z, alpha_L))
+                # ~ #gp.mean_fct = Photoz_linear_sed_basis(f_mod)
+                # ~ #gp.kernel = Photoz_kernel(bandCoefAmplitudes, bandCoefPositions, bandCoefWidths, params['lines_pos'], params['lines_width'], V_C, V_L, alpha_C, alpha_L, redshiftGrid=redshiftGridGP, use_interpolators=True)
+                # ~ #gp = PhotozGP(f_mod, bandCoefAmplitudes, bandCoefPositions, bandCoefWidths, params['lines_pos'], params['lines_width'], V_C, V_L, alpha_C, alpha_L, redshiftGridGP, use_interpolators=True)
+                # ~ gp.kernel.use_interpolators=False
+                # ~ gp.kernel.alpha_L = alpha_L
+                # ~ gp.kernel.update_kernelparts(X)
+                # ~ gp.setData(X, Y, Yvar, bestTypes[loc])
+                # ~ marginalLikelihood = gp.margLike()
+                # ~ #print("GP créé. Marginal Likelihood = {}".format(marginalLikelihood))
+                # ~ allZ.append(z)
+                # ~ allMargLike.append(marginalLikelihood)
+                # ~ allAlphaL.append(alpha_L)
                 
-        ## Plot for this iteration:
+        ## Plot for this iteration on ellPriorSigma:
+        print("Création des graphes pour ellPriorSigma = {}".format(ellPriorSigma))
         cmap = "coolwarm_r"
         vmin = 0.0
         alpha = 0.9
         s = 5
-        fig, axs = plt.subplots(1, 2)
-        vs = axs[0].scatter(allVc, allZ, 
-                            s=s, c=allMargLike, cmap=cmap, linewidth=0, alpha=alpha)
-        vs = axs[1].scatter(allVc, allZ, 
-                            s=s, c=allMargLike, cmap=cmap, linewidth=0, alpha=alpha)
-        clb = plt.colorbar(vs, ax=axs.ravel().tolist())
-        clb.set_label('Marginal Likelihood at spec-$z$ and $V_C$')
-        for i in range(2):
-            #axs[i].plot([0, zmax], [0, zmax], c='k', lw=1, zorder=0, alpha=1)
-            axs[i].set_ylim([0, np.max(allZ)])
-            axs[i].set_xscale('log')
-            axs[i].set_xlabel('$V_C$')
-        axs[0].set_ylabel('MAP photo-$z$')
+        fig, axs = plt.subplots(1, 2, constrained_layout=True)
+        # ~ vs0 = axs[0].scatter(allZ, allMargLike, s=s, c=allAlphaL, cmap=cmap, linewidth=0, alpha=alpha)
+        # ~ vs1 = axs[1].scatter(allAlphaL, allMargLike, s=s, c=allZ, cmap=cmap, linewidth=0, alpha=alpha)
+        # ~ clb0 = plt.colorbar(vs0, ax=axs[0], location = 'right')
+        # ~ clb1 = plt.colorbar(vs1, ax=axs[1], location = 'right')
+        # ~ clb0.set_label('$alpha_L$')
+        # ~ clb1.set_label('MAP photo-$z$')
+        # ~ axs[0].set_xlim([0, np.max(allZ)])
+        # ~ axs[0].set_ylim([np.min(allMargLike), np.max(allMargLike)])
+        # ~ axs[1].set_xlim([np.min(allAlphaL), np.max(allAlphaL)])
+        # ~ axs[1].set_ylim([np.min(allMargLike), np.max(allMargLike)])
+        # ~ axs[0].set_xlabel('MAP photo-$z$')
+        # ~ axs[0].set_ylabel('GP Marginal likelihood')
+        # ~ axs[1].set_xlabel('$alpha_L$')
+        # ~ axs[1].set_ylabel('GP Marginal likelihood')
 
-        axs[0].set_title('$\ell_prior \sigma = 1.0$')
-        axs[1].set_title('$\ell_prior \sigma = 10.0$')
+        # ~ axs[0].set_title('$\ell_{prior \sigma} = $'+'{}'.format(ellPriorSigma))
+        # ~ axs[1].set_title('$\ell_{prior \sigma} = $'+'{}'.format(ellPriorSigma))
+        
+        # ~ fig.savefig( "alphaL_MarginalLikelihood_z_ellSigma-{}.png".format(ellPriorSigma) )
+        
+        
+        vs0 = axs[0].hist2d(allZ, allMargLike, bins=[100, 100], range=[[np.min(allZ), np.max(allZ)], [-10, 100]], density=True, cmap="Blues", alpha=alpha)
+        vs1 = axs[1].hist2d(allVc, allMargLike, bins=[50, 100], range=[[np.min(allVc), np.max(allVc)], [-10, 100]], density=True, cmap="Reds", alpha=alpha)
+        # ~ clb0 = plt.colorbar(vs0, ax=axs[0], location = 'right')
+        # ~ clb1 = plt.colorbar(vs1, ax=axs[1], location = 'right')
+        # ~ clb0.set_label('$alpha_C$')
+        # ~ clb1.set_label('MAP photo-$z$')
+        # ~ axs[0].set_xlim([0, np.max(allZ)])
+        # ~ axs[0].set_ylim([np.min(allMargLike), np.max(allMargLike)])
+        # ~ axs[1].set_xlim([np.min(allAlphaC), np.max(allAlphaC)])
+        # ~ axs[1].set_ylim([np.min(allMargLike), np.max(allMargLike)])
+        axs[0].set_xlabel('MAP photo-$z$')
+        axs[0].set_ylabel('GP Marginal likelihood')
+        axs[1].set_xlabel('$V_C$')
+        axs[1].set_ylabel('GP Marginal likelihood')
 
-        fig.tight_layout()
-        fig.savefig( "VC_MarginalLikelihood.png" )
-            
+        axs[0].set_title('$\ell_{prior \sigma} = $'+'{}'.format(ellPriorSigma))
+        axs[1].set_title('$\ell_{prior \sigma} = $'+'{}'.format(ellPriorSigma))
+        
+        fig.savefig( "VC_MargLike_z_v3.1_DESC_ellSigma-{}.png".format(ellPriorSigma) )
+
 
 
 
