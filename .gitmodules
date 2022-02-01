@@ -1,4 +1,4 @@
 [submodule "Delight"]
 	path = Delight
-	url = ./Delight
+	url = https://github.com/JospehCeh/Delight
 	branch = interfacerail
