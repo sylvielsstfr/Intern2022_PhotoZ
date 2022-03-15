@@ -2,3 +2,12 @@
 	path = Delight
 	url = https://github.com/JospehCeh/Delight
 	branch = interfacerail
+[submodule "PhotoZML"]
+	path = PhotoZML
+	url = git@github.com:sylvielsstfr/PhotoZML.git
+[submodule "LEPHARE"]
+	path = LEPHARE
+	url = https://gitlab.lam.fr/Galaxies/LEPHARE.git
+[submodule "LEPHARELSST"]
+	path = LEPHARELSST
+	url = git@github.com:JospehCeh/LEPHARELSST.git
