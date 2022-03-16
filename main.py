@@ -16,8 +16,8 @@ desc_dir                   = 'desc-dc2'                       # subdir of Deligh
 delight_paramDir           = 'tmp'                            # subdir of descDir
 delight_runFile            = 'run_delight_descdc2.py'         # usually in descDir
 delight_paramFile          = 'parameters_DESC-DC2.cfg'        # usually in paramDir
-test_filename              = 'test_dc2_validation_9816.hdf5'  # relative path
-train_filename             = 'train_dc2_validation_9816.hdf5' # relative path
+test_filename              = 'PhotoZML/data/test_dc2_training_9816.hdf5'   # relative path
+train_filename             = 'PhotoZML/data/test_dc2_validation_9816.hdf5' # relative path
 test_fileout_delight       = 'test_gal_fluxredshifts.txt'     # file name only - will be created in the appropriate directory, until this is automated
 train_fileout_delight      = 'train_gal_fluxredshifts.txt'    # file name only - will be created in the appropriate directory, until this is automated
 lephare_dir                = 'LEPHARELSST'                    # relative path - should be the directory where LSST.para and runLePhareLSST.sh are located and run.
@@ -357,7 +357,7 @@ def plot_and_stats(z_spec, z_phot, i_mag=[], title=''):
     fig.suptitle(title+' : $\sigma_\mathrm{NMAD} \ = $%6.4f\n'%nmad+'$(\Delta z)>0.15(1+z) $ outliers = %6.3f'%(eta*100)+'%', fontsize=18)
     return fig
 
-def plot_random_pdz(z1, pdz1, label1='', z2, pdz2, label2='', z3, pdz3, label3='', z4, pdz4, label4=''):
+def plot_random_pdz(z1, pdz1, z2, pdz2, z3, pdz3, z4, pdz4, label1='', label2='', label3='', label4=''):
     ncol = 4
     fig, axs = plt.subplots(5, ncol, figsize=(12, 12), sharex=True, sharey=False)
     axs = axs.ravel()
@@ -396,7 +396,10 @@ def plot_random_pdz(z1, pdz1, label1='', z2, pdz2, label2='', z3, pdz3, label3='
 t_start=time.time()
 delight_absRunFile=os.path.realpath(os.path.normpath(os.path.join("./", delight_dir, desc_dir, delight_runFile)))
 delight_absParamFile=os.path.realpath(os.path.normpath(os.path.join("./", delight_dir, desc_dir, delight_paramDir, delight_paramFile)))
+execDir = os.path.realpath(os.getcwd())
+os.chdir(os.path.realpath(os.path.normpath(os.path.join("./", delight_dir, desc_dir))))
 params = parseParamFile(delight_absParamFile, verbose=False)
+os.chdir(execDir)
 test_fileout_delight = params['target_catFile']
 train_fileout_delight = params['training_catFile']
 testFile_absPath=os.path.realpath(os.path.normpath(os.path.join("./", test_filename)))
@@ -441,7 +444,6 @@ z_phot = regrn.predict(test_data_mags)
 t_MLpredict=time.time()
 
 # Run Delight - call the appropriate python fonctions
-execDir = os.path.realpath(os.getcwd())
 os.chdir(os.path.realpath(os.path.normpath(os.path.join("./", delight_dir, desc_dir))))
 from run_delight_descdc2 import run_full_delight_confFile
 run_full_delight_confFile(delight_absParamFile)
@@ -577,10 +579,14 @@ figZsZp_ML = plot_and_stats(test_z, z_phot, test_data_mags[:, 3], title='Random 
 figZsZp_lephare = plot_and_stats(zs, zp, mag3, title='LEPHARE++')
 figZsZp_delightTF = plot_and_stats(metricscww[:, i_zt], metricscww[:, i_zmap], title='Delight TF')
 figZsZp_delightGP = plot_and_stats(metrics[:, i_zt], metrics[:, i_zmap], title='Delight TF+GP')
-figRandPdz = plot_random_pdz(redshiftGrid, pdfs_cww[k, :], label1='Delight TF',\
-                             redshiftGrid, pdfs[k, :], label2='Delight TF+GP',\
-                             pdzRange, pdzPhare[np.argmin(dummy), 1:], label3='LePhare++ TF',\
-                             [], [], label4="No PDF for ML method")
+figRandPdz = plot_random_pdz(redshiftGrid, pdfs_cww[k, :],\
+                             redshiftGrid, pdfs[k, :],\
+                             pdzRange, pdzPhare[np.argmin(dummy), 1:],\
+                             [], [],\
+                             label1='Delight TF',\
+                             label2='Delight TF+GP',\
+                             label3='LePhare++ TF',\
+                             label4="No PDF for ML method")
 
 figZsZp_ML.show()
 figZsZp_lephare.show()
