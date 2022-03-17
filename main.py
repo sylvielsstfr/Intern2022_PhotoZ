@@ -30,6 +30,10 @@ ellPriorSigma, zPriorSigma = 0.5, 0.2
 nb_est                     = 50
 reg_depth                  = 30
 
+
+runDelight=False
+runLePhare=False
+
 ################################
 ### END OF USER INPUTS       ###
 ### DO NOT MODIFY CODE BELOW ###
@@ -287,6 +291,7 @@ def plot_and_stats(z_spec, z_phot, i_mag=[], title=''):
     outlier_upper = x + 0.15*(1+x)
     outlier_lower = x - 0.15*(1+x)
     
+    print('DEBUG: zphot size = {}, zspec size = {}'.format(z_phot.shape, z_spec.shape))
     deltaZ = (z_phot - z_spec)/(1 + z_spec)
     
     mask = np.abs((z_phot - z_spec)/(1 + z_spec)) > 0.15
@@ -373,12 +378,12 @@ def plot_random_pdz(z1, pdz1, z2, pdz2, z3, pdz3, z4, pdz4, label1='', label2=''
             dummy=np.append(dummy, (z-zspec))
         dummy=np.absolute(dummy)
         galId=Id[np.argmin(dummy)]
-        axs[ik].plot(z1, pdz1, lw=lw, label=label1)
-        axs[ik].plot(z2, pdz2, lw=lw, label=label2)
-        axs[ik].plot(z3, pdz3, lw=lw, label=label3)
+        axs[ik].plot(z1, pdz1[k,:], lw=lw, label=label1)
+        axs[ik].plot(z2, pdz2[k,:], lw=lw, label=label2)
+        axs[ik].plot(z3, pdz3[np.argmin(dummy), 1:], lw=lw, label=label3)
         axs[ik].plot(z4, pdz4, lw=lw, label=label4)
         axs[ik].axvline(zspec, c="k", lw=1, label='Spec-z')
-        ymax = np.max(np.concatenate((pdz1, pdz2, pdz3, pdz4)))
+        ymax = np.max(np.concatenate((pdz1[k,:], pdz2[k,:], pdz3[np.argmin(dummy), 1:], pdz4)))
         axs[ik].set_ylim([0, ymax*1.2])
         axs[ik].set_xlim([0, 3.1])
         axs[ik].set_yticks([])
@@ -449,25 +454,31 @@ t_MLpredict=time.time()
 print('ML estimation done. Training time: {} s, Estimation time: {} s'.format(t_MLtrain-t_init, t_MLpredict-t_MLtrain))
 
 # Run Delight - call the appropriate python fonctions
-os.chdir(os.path.realpath(os.path.normpath(os.path.join("./", delight_dir, desc_dir))))
-print('DEBUG - current working directory:\n\t {}'.format(os.getcwd()))
-sys.path.append(os.getcwd())
-from run_full_delight_confFile.py import run_full_delight_confFile
-print('Running Delight - please be patient.')
-run_full_delight_confFile(delight_absParamFile)
-os.chdir(execDir)
+if runDelight:
+    os.chdir(os.path.realpath(os.path.normpath(os.path.join("./", delight_dir, desc_dir))))
+    print('DEBUG - current working directory:\n\t {}'.format(os.getcwd()))
+    sys.path.append(os.getcwd())
+    from run_full_delight_confFile import run_full_delight_confFile
+    print('Running Delight - please be patient.')
+    run_full_delight_confFile(delight_absParamFile)
+    os.chdir(execDir)
+else:
+    print('Skip Delight')
 t_endDelight=time.time()
 print('Delight complete. Duration: {} s'.format(t_endDelight-t_MLpredict))
 
 # Run LePhare - call the appropriate shell fonctions
-print('Running LEPHARE++')
-os.chdir(os.path.realpath(os.path.normpath(os.path.join("./", lephare_dir))))
-os.environ['LEPHAREDIR'] = os.path.realpath(os.path.normpath(os.path.join("./", 'LEPHARE')))
-os.environ['LEPHAREWORK'] = os.path.realpath(os.path.normpath(os.path.join("./", lephare_dir)))
-os.environ['OMP_NUM_THREADS'] = '10'
-os.environ['CAT_FILE_IN'] = lephare_testFileoutAbs
-subprocess.run('runLePhareLSST.sh')
-os.chdir(execDir)
+if runLePhare:
+    print('Running LEPHARE++')
+    os.chdir(os.path.realpath(os.path.normpath(os.path.join("./", lephare_dir))))
+    os.environ['LEPHAREDIR'] = os.path.realpath(os.path.normpath(os.path.join("..", 'LEPHARE')))
+    os.environ['LEPHAREWORK'] = os.getcwd()
+    os.environ['OMP_NUM_THREADS'] = '10'
+    os.environ['CAT_FILE_IN'] = lephare_testFileoutAbs
+    subprocess.run('runLePhareLSST.sh')
+    os.chdir(execDir)
+else:
+    print('Skip LEPHARE++')
 t_endLePhare=time.time()
 print('LEPHARE++ complete. Duration: {} s'.format(t_endLePhare-t_endDelight))
 
@@ -475,6 +486,10 @@ print('LEPHARE++ complete. Duration: {} s'.format(t_endLePhare-t_endDelight))
 
 ## Load delight data
 ### First read a bunch of useful stuff from the parameter file.
+dir_seds = os.path.realpath(os.path.normpath(os.path.join("./", delight_dir, desc_dir, params['templates_directory'])))
+dir_filters = os.path.realpath(os.path.normpath(os.path.join("./", delight_dir, desc_dir, params['bands_directory'])))
+params['bands_directory'] = dir_filters
+params['templates_directory'] = dir_seds
 bandCoefAmplitudes, bandCoefPositions, bandCoefWidths, norms = readBandCoefficients(params)
 bandNames = params['bandNames']
 numBands, numCoefs = bandCoefAmplitudes.shape
@@ -482,8 +497,6 @@ fluxredshifts = np.loadtxt(lephare_testFileoutAbs)
 fluxredshifts_train = np.loadtxt(lephare_trainFileoutAbs)
 bandIndices, bandNames, bandColumns, bandVarColumns, redshiftColumn, refBandColumn = readColumnPositions(params, prefix='target_')
 redshiftDistGrid, redshiftGrid, redshiftGridGP = createGrids(params)
-dir_seds = os.path.realpath(os.path.normpath(os.path.join("./", delight_dir, desc_dir, params['templates_directory'])))
-dir_filters = os.path.realpath(os.path.normpath(os.path.join("./", delight_dir, desc_dir, params['bands_directory'])))
 lambdaRef = params['lambdaRef']
 sed_names = params['templates_names']
 nt = len(sed_names)
@@ -587,21 +600,21 @@ pdzRange = np.concatenate((np.array([0.0]), pdzRange, np.array([3.01])))
 pdzPhare = np.loadtxt(pdzOut)
 
 
-figZsZp_ML = plot_and_stats(test_z, z_phot, test_data_mags[:, 3], title='Random Forrest Regressor')
+figZsZp_ML = plot_and_stats(test_z[:,0], z_phot, test_data_mags[:, 3], title='Random Forrest Regressor')
 figZsZp_lephare = plot_and_stats(zs, zp, mag3, title='LEPHARE++')
-figZsZp_delightTF = plot_and_stats(metricscww[:, i_zt], metricscww[:, i_zmap], title='Delight TF')
-figZsZp_delightGP = plot_and_stats(metrics[:, i_zt], metrics[:, i_zmap], title='Delight TF+GP')
-figRandPdz = plot_random_pdz(redshiftGrid, pdfs_cww[k, :],\
-                             redshiftGrid, pdfs[k, :],\
-                             pdzRange, pdzPhare[np.argmin(dummy), 1:],\
+figZsZp_delightTF = plot_and_stats(metricscww[:, i_zt], metricscww[:, i_zmap], test_data_mags[:, 3], title='Delight TF')
+figZsZp_delightGP = plot_and_stats(metrics[:, i_zt], metrics[:, i_zmap], test_data_mags[:, 3], title='Delight TF+GP')
+figRandPdz = plot_random_pdz(redshiftGrid, pdfs_cww,\
+                             redshiftGrid, pdfs,\
+                             pdzRange, pdzPhare,\
                              [], [],\
                              label1='Delight TF',\
                              label2='Delight TF+GP',\
                              label3='LePhare++ TF',\
                              label4="No PDF for ML method")
 
-figZsZp_ML.show()
-figZsZp_lephare.show()
-figZsZp_delightTF.show()
-figZsZp_delightGP.show()
-figRandPdz.show()
+figZsZp_ML.savefig('figZsZp_ML.png')
+figZsZp_lephare.savefig('figZsZp_lephare.png')
+figZsZp_delightTF.savefig('figZsZp_delightTF.png')
+figZsZp_delightGP.savefig('figZsZp_delightGP.png')
+figRandPdz.savefig('figRandPdz.png')
