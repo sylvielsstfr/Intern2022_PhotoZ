@@ -16,8 +16,8 @@ desc_dir                   = 'desc-dc2'                       # subdir of Deligh
 delight_paramDir           = 'tmp'                            # subdir of descDir
 delight_runFile            = 'run_delight_descdc2.py'         # usually in descDir
 delight_paramFile          = 'parameters_DESC-DC2.cfg'        # usually in paramDir
-test_filename              = 'PhotoZML/data/test_dc2_training_9816.hdf5'   # relative path
-train_filename             = 'PhotoZML/data/test_dc2_validation_9816.hdf5' # relative path
+test_filename              = 'PhotoZML/data/test_dc2_validation_9816.hdf5'   # relative path
+train_filename             = 'PhotoZML/data/test_dc2_training_9816.hdf5' # relative path
 test_fileout_delight       = 'test_gal_fluxredshifts.txt'     # file name only - will be created in the appropriate directory, until this is automated
 train_fileout_delight      = 'train_gal_fluxredshifts.txt'    # file name only - will be created in the appropriate directory, until this is automated
 lephare_dir                = 'LEPHARELSST'                    # relative path - should be the directory where LSST.para and runLePhareLSST.sh are located and run.
@@ -393,12 +393,13 @@ def plot_random_pdz(z1, pdz1, z2, pdz2, z3, pdz3, z4, pdz4, label1='', label2=''
 #####################################################
 
 # Generate the inputs
+print("Generating the inputs")
 t_start=time.time()
 delight_absRunFile=os.path.realpath(os.path.normpath(os.path.join("./", delight_dir, desc_dir, delight_runFile)))
 delight_absParamFile=os.path.realpath(os.path.normpath(os.path.join("./", delight_dir, desc_dir, delight_paramDir, delight_paramFile)))
 execDir = os.path.realpath(os.getcwd())
 os.chdir(os.path.realpath(os.path.normpath(os.path.join("./", delight_dir, desc_dir))))
-params = parseParamFile(delight_absParamFile, verbose=False)
+params = parseParamFile(delight_absParamFile, verbose=False, catFilesNeeded=False)
 os.chdir(execDir)
 test_fileout_delight = params['target_catFile']
 train_fileout_delight = params['training_catFile']
@@ -409,14 +410,14 @@ delight_trainFileoutAbs=os.path.realpath(os.path.normpath(os.path.join("./", del
 lephare_testFileoutAbs=os.path.realpath(os.path.normpath(os.path.join("./", lephare_dir, test_fileout_lephare)))
 lephare_trainFileoutAbs=os.path.realpath(os.path.normpath(os.path.join("./", lephare_dir, train_fileout_lephare)))
 
-test_data_mags, test_data_colors, test_data_colmag, test_perturbed_colmag, test_z, dummy1, dummy2 =\
+test_data_mags, test_data_colors, test_data_colmag, test_z, dummy1, dummy2 =\
     create_all_inputs(testFile_absPath,\
                       mag=mag_filt,\
                       snr=snr_filt,\
                       fileout_lephare=lephare_testFileoutAbs,\
                       fileout_delight=delight_testFileoutAbs)
 
-train_data_mags, train_data_colors, train_data_colmag, train_perturbed_colmag, train_z, dummy3, dummy4 =\
+train_data_mags, train_data_colors, train_data_colmag, train_z, dummy3, dummy4 =\
     create_all_inputs(trainFile_absPath,\
                       mag=mag_filt,\
                       snr=snr_filt,\
@@ -424,32 +425,42 @@ train_data_mags, train_data_colors, train_data_colmag, train_perturbed_colmag, t
                       fileout_delight=delight_trainFileoutAbs)
 
 # DEBUG #
-print(test_data_mags.shape, test_data_colors.shape, test_data_colmag.shape, test_perturbed_colmag.shape, test_z.shape, test_fileout_lephare, test_fileout_delight)
-print(train_data_mags.shape, train_data_colors.shape, train_data_colmag.shape, train_perturbed_colmag.shape, train_z.shape, train_fileout_lephare, train_fileout_delight)
+print(test_data_mags.shape, test_data_colors.shape, test_data_colmag.shape, test_z.shape, test_fileout_lephare, test_fileout_delight)
+print(train_data_mags.shape, train_data_colors.shape, train_data_colmag.shape, train_z.shape, train_fileout_lephare, train_fileout_delight)
 # END DEBUG #
 
 t_init=time.time()
 print('Input creation duration: {} s'.format(t_init-t_start))
 
 # Run the ML - call the appropriate python fonctions
-## We need to set up an implementation of the scikit-learn RandomForestRegressor in an object called 'regrn'. 
+## We need to set up an implementation of the scikit-learn RandomForestRegressor in an object called 'regrn'.
+print('Beginning of ML estimation')
 regrn = RandomForestRegressor(n_estimators = nb_est, max_depth = reg_depth, max_features = 'auto')
 
 ## Train the regressor using the training data
+print('Training estimator')
 regrn.fit(train_data_mags, train_z)
 t_MLtrain=time.time()
 
 ## Apply the regressor to predict values for the test data
+print('Applying estimator')
 z_phot = regrn.predict(test_data_mags)
 t_MLpredict=time.time()
+print('ML estimation done. Training time: {} s, Estimation time: {} s'.format(t_MLtrain-t_init, t_MLpredict-t_MLtrain))
 
 # Run Delight - call the appropriate python fonctions
 os.chdir(os.path.realpath(os.path.normpath(os.path.join("./", delight_dir, desc_dir))))
-from run_delight_descdc2 import run_full_delight_confFile
+print('DEBUG - current working directory:\n\t {}'.format(os.getcwd()))
+sys.path.append(os.getcwd())
+from run_full_delight_confFile.py import run_full_delight_confFile
+print('Running Delight - please be patient.')
 run_full_delight_confFile(delight_absParamFile)
 os.chdir(execDir)
+t_endDelight=time.time()
+print('Delight complete. Duration: {} s'.format(t_endDelight-t_MLpredict))
 
 # Run LePhare - call the appropriate shell fonctions
+print('Running LEPHARE++')
 os.chdir(os.path.realpath(os.path.normpath(os.path.join("./", lephare_dir))))
 os.environ['LEPHAREDIR'] = os.path.realpath(os.path.normpath(os.path.join("./", 'LEPHARE')))
 os.environ['LEPHAREWORK'] = os.path.realpath(os.path.normpath(os.path.join("./", lephare_dir)))
@@ -457,7 +468,8 @@ os.environ['OMP_NUM_THREADS'] = '10'
 os.environ['CAT_FILE_IN'] = lephare_testFileoutAbs
 subprocess.run('runLePhareLSST.sh')
 os.chdir(execDir)
-
+t_endLePhare=time.time()
+print('LEPHARE++ complete. Duration: {} s'.format(t_endLePhare-t_endDelight))
 
 # Plots - same as notebook, save as PDF: see LEPHARE python plot fonction.
 
