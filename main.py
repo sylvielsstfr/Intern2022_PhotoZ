@@ -53,6 +53,7 @@ import h5py
 import numpy as np
 from astropy.table import Table   #astropy routine for reading tables
 import matplotlib.pyplot as plt   #plotting routines
+from matplotlib.backends.backend_pdf import PdfPages
 
 # Random forest routine from scikit-learn:
 from sklearn.ensemble import RandomForestRegressor
@@ -411,6 +412,7 @@ train_fileout_delight = params['training_catFile']
 testFile_absPath=os.path.realpath(os.path.normpath(os.path.join("./", test_filename)))
 trainFile_absPath=os.path.realpath(os.path.normpath(os.path.join("./", train_filename)))
 delight_testFileoutAbs=os.path.realpath(os.path.normpath(os.path.join("./", delight_dir, desc_dir, test_fileout_delight)))
+#print('Delight test file:\n\t{}'.format(delight_testFileoutAbs))
 delight_trainFileoutAbs=os.path.realpath(os.path.normpath(os.path.join("./", delight_dir, desc_dir, train_fileout_delight)))
 lephare_testFileoutAbs=os.path.realpath(os.path.normpath(os.path.join("./", lephare_dir, test_fileout_lephare)))
 lephare_trainFileoutAbs=os.path.realpath(os.path.normpath(os.path.join("./", lephare_dir, train_fileout_lephare)))
@@ -430,8 +432,8 @@ train_data_mags, train_data_colors, train_data_colmag, train_z, dummy3, dummy4 =
                       fileout_delight=delight_trainFileoutAbs)
 
 # DEBUG #
-print(test_data_mags.shape, test_data_colors.shape, test_data_colmag.shape, test_z.shape, test_fileout_lephare, test_fileout_delight)
-print(train_data_mags.shape, train_data_colors.shape, train_data_colmag.shape, train_z.shape, train_fileout_lephare, train_fileout_delight)
+#print(test_data_mags.shape, test_data_colors.shape, test_data_colmag.shape, test_z.shape, lephare_testFileoutAbs, delight_testFileoutAbs)
+#print(train_data_mags.shape, train_data_colors.shape, train_data_colmag.shape, train_z.shape, lephare_trainFileoutAbs, delight_trainFileoutAbs)
 # END DEBUG #
 
 t_init=time.time()
@@ -493,8 +495,8 @@ params['templates_directory'] = dir_seds
 bandCoefAmplitudes, bandCoefPositions, bandCoefWidths, norms = readBandCoefficients(params)
 bandNames = params['bandNames']
 numBands, numCoefs = bandCoefAmplitudes.shape
-fluxredshifts = np.loadtxt(lephare_testFileoutAbs)
-fluxredshifts_train = np.loadtxt(lephare_trainFileoutAbs)
+fluxredshifts = np.loadtxt(delight_testFileoutAbs)
+fluxredshifts_train = np.loadtxt(delight_trainFileoutAbs)
 bandIndices, bandNames, bandColumns, bandVarColumns, redshiftColumn, refBandColumn = readColumnPositions(params, prefix='target_')
 redshiftDistGrid, redshiftGrid, redshiftGridGP = createGrids(params)
 lambdaRef = params['lambdaRef']
@@ -516,6 +518,7 @@ pdfs_cww = np.loadtxt(os.path.realpath(os.path.normpath(os.path.join("./", delig
 pdfatZ_cww = metricscww[:, 5] / pdfs_cww.max(axis=1)
 pdfatZ = metrics[:, 5] / pdfs.max(axis=1)
 nobj = pdfatZ.size
+print('nobj = {}'.format(nobj))
 pdfs /= np.trapz(pdfs, x=redshiftGrid, axis=1)[:, None]
 pdfs_cww /= np.trapz(pdfs_cww, x=redshiftGrid, axis=1)[:, None]
 
@@ -604,17 +607,55 @@ figZsZp_ML = plot_and_stats(test_z[:,0], z_phot, test_data_mags[:, 3], title='Ra
 figZsZp_lephare = plot_and_stats(zs, zp, mag3, title='LEPHARE++')
 figZsZp_delightTF = plot_and_stats(metricscww[:, i_zt], metricscww[:, i_zmap], test_data_mags[:, 3], title='Delight TF')
 figZsZp_delightGP = plot_and_stats(metrics[:, i_zt], metrics[:, i_zmap], test_data_mags[:, 3], title='Delight TF+GP')
-figRandPdz = plot_random_pdz(redshiftGrid, pdfs_cww,\
-                             redshiftGrid, pdfs,\
-                             pdzRange, pdzPhare,\
-                             [], [],\
-                             label1='Delight TF',\
-                             label2='Delight TF+GP',\
-                             label3='LePhare++ TF',\
-                             label4="No PDF for ML method")
+#figRandPdz = plot_random_pdz(redshiftGrid, pdfs_cww,\
+#                             redshiftGrid, pdfs,\
+#                             pdzRange, pdzPhare,\
+#                             [], [],\
+#                             label1='Delight TF',\
+#                             label2='Delight TF+GP',\
+#                             label3='LePhare++ TF',\
+#                             label4="No PDF for ML method")
+
+ncol = 4
+figRandPdz, axsRandPdz = plt.subplots(5, ncol, figsize=(12, 12), sharex=True, sharey=False)
+axsRandPdz = axsRandPdz.ravel()
+sel = np.random.choice(nobj, axsRandPdz.size, replace=False)
+lw = 2
+for ik in range(axsRandPdz.size):
+    k = sel[ik]
+    zspec=fluxredshifts[k, redshiftColumn]
+    #print(zspec, np.where(zs == zspec))
+    dummy=np.array([])
+    for z in zs:
+        dummy=np.append(dummy, (z-zspec))
+    dummy=np.absolute(dummy)
+    galId=Id[np.argmin(dummy)]
+    axsRandPdz[ik].plot(redshiftGrid, pdfs_cww[k,:], lw=lw, label='Delight TF')
+    axsRandPdz[ik].plot(redshiftGrid, pdfs[k,:], lw=lw, label='Delight TF+GP')
+    axsRandPdz[ik].plot(pdzRange, pdzPhare[k, 1:], lw=lw, label='LePhare++ TF')
+    axsRandPdz[ik].plot([], [], lw=lw, label="No PDF for ML method")
+    axsRandPdz[ik].axvline(zspec, c="k", lw=1, label='Spectro-Z')
+    ymax = np.max(np.concatenate((pdfs_cww[k,:], pdfs[k,:], pdzPhare[np.argmin(dummy), 1:], [])))
+    axsRandPdz[ik].set_ylim([0, ymax*1.2])
+    axsRandPdz[ik].set_xlim([0, 3.1])
+    axsRandPdz[ik].set_yticks([])
+    axsRandPdz[ik].set_xticks([0.0, 0.4, 0.8, 1.2, 1.6, 2.0, 2.4, 2.8])
+for i in range(ncol):
+    axsRandPdz[-i-1].set_xlabel('Redshift', fontsize=10)
+axsRandPdz[0].legend(ncol=3, frameon=False, loc='upper left', bbox_to_anchor=(0.0, 1.4))
 
 figZsZp_ML.savefig('figZsZp_ML.png')
 figZsZp_lephare.savefig('figZsZp_lephare.png')
 figZsZp_delightTF.savefig('figZsZp_delightTF.png')
 figZsZp_delightGP.savefig('figZsZp_delightGP.png')
 figRandPdz.savefig('figRandPdz.png')
+
+# store the figure in a PDF
+# All the figures will be collected in a single pdf file 
+pdfOut = PdfPages('plotFileOut.pdf')
+figZsZp_ML.savefig(pdfOut,format='pdf')
+figZsZp_lephare.savefig(pdfOut,format='pdf')
+figZsZp_delightTF.savefig(pdfOut,format='pdf')
+figZsZp_delightGP.savefig(pdfOut,format='pdf')
+figRandPdz.savefig(pdfOut,format='pdf')
+pdfOut.close()
