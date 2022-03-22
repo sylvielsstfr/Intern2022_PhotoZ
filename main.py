@@ -18,8 +18,8 @@ delight_runFile            = 'run_delight_descdc2.py'         # usually in descD
 delight_paramFile          = 'parameters_DESC-DC2.cfg'        # usually in paramDir
 test_filename              = 'PhotoZML/data/test_dc2_validation_9816.hdf5'   # relative path
 train_filename             = 'PhotoZML/data/test_dc2_training_9816.hdf5' # relative path
-test_fileout_delight       = 'test_gal_fluxredshifts.txt'     # file name only - will be created in the appropriate directory, until this is automated
-train_fileout_delight      = 'train_gal_fluxredshifts.txt'    # file name only - will be created in the appropriate directory, until this is automated
+#test_fileout_delight       = 'test_gal_fluxredshifts.txt'     # file name only - will be created in the appropriate directory, until this is automated
+#train_fileout_delight      = 'train_gal_fluxredshifts.txt'    # file name only - will be created in the appropriate directory, until this is automated
 lephare_dir                = 'LEPHARELSST'                    # relative path - should be the directory where LSST.para and runLePhareLSST.sh are located and run.
 test_fileout_lephare       = 'test_DC2_VALID_CAT_IN.in'       # file name only - will be created in the appropriate directory, until this is automated
 train_fileout_lephare      = 'train_DC2_VALID_CAT_IN.in'      # file name only - will be created in the appropriate directory, until this is automated
@@ -31,8 +31,11 @@ nb_est                     = 50
 reg_depth                  = 30
 
 
+runML=True
 runDelight=False
-runLePhare=False
+runLePhare=True
+photoZML_name='regrnPhotoZ.txt'
+pdfOutput_name='plotFileOut.pdf'
 
 ################################
 ### END OF USER INPUTS       ###
@@ -441,17 +444,22 @@ print('Input creation duration: {} s'.format(t_init-t_start))
 
 # Run the ML - call the appropriate python fonctions
 ## We need to set up an implementation of the scikit-learn RandomForestRegressor in an object called 'regrn'.
-print('Beginning of ML estimation')
-regrn = RandomForestRegressor(n_estimators = nb_est, max_depth = reg_depth, max_features = 'auto')
+if runML:
+    print('Beginning of ML estimation')
+    regrn = RandomForestRegressor(n_estimators = nb_est, max_depth = reg_depth, max_features = 'auto')
 
-## Train the regressor using the training data
-print('Training estimator')
-regrn.fit(train_data_mags, train_z)
-t_MLtrain=time.time()
+    ## Train the regressor using the training data
+    print('Training estimator')
+    regrn.fit(train_data_mags, train_z.ravel())
+    t_MLtrain=time.time()
 
-## Apply the regressor to predict values for the test data
-print('Applying estimator')
-z_phot = regrn.predict(test_data_mags)
+    ## Apply the regressor to predict values for the test data
+    print('Applying estimator')
+    z_phot = regrn.predict(test_data_mags)
+    
+    np.savetxt(photoZML_name, np.column_stack((test_z, test_data_mags, z_phot)))
+else:
+    print('Skip ML')
 t_MLpredict=time.time()
 print('ML estimation done. Training time: {} s, Estimation time: {} s'.format(t_MLtrain-t_init, t_MLpredict-t_MLtrain))
 
@@ -602,8 +610,10 @@ pdzRange = np.arange(0.01, 3.02, 0.01)
 pdzRange = np.concatenate((np.array([0.0]), pdzRange, np.array([3.01])))
 pdzPhare = np.loadtxt(pdzOut)
 
-
-figZsZp_ML = plot_and_stats(test_z[:,0], z_phot, test_data_mags[:, 3], title='Random Forrest Regressor')
+test_z=np.loadtxt(photoZML_name)[:, 0]
+z_phot=np.loadtxt(photoZML_name)[:, -1]
+test_data_mags=np.loadtxt(photoZML_name)[:, 1:-1]
+figZsZp_ML = plot_and_stats(test_z, z_phot, test_data_mags[:, 3], title='Random Forrest Regressor')
 figZsZp_lephare = plot_and_stats(zs, zp, mag3, title='LEPHARE++')
 figZsZp_delightTF = plot_and_stats(metricscww[:, i_zt], metricscww[:, i_zmap], test_data_mags[:, 3], title='Delight TF')
 figZsZp_delightGP = plot_and_stats(metrics[:, i_zt], metrics[:, i_zmap], test_data_mags[:, 3], title='Delight TF+GP')
@@ -652,7 +662,7 @@ figRandPdz.savefig('figRandPdz.png')
 
 # store the figure in a PDF
 # All the figures will be collected in a single pdf file 
-pdfOut = PdfPages('plotFileOut.pdf')
+pdfOut = PdfPages(pdfOutput_name)
 figZsZp_ML.savefig(pdfOut,format='pdf')
 figZsZp_lephare.savefig(pdfOut,format='pdf')
 figZsZp_delightTF.savefig(pdfOut,format='pdf')
