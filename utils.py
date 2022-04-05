@@ -25,9 +25,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.model_selection import cross_val_predict
 
 # Useful Delight routines:
-sys.path.append(os.path.realpath(os.path.normpath(os.path.join('./', delight_dir))))
-from delight.io import *
-from delight.utils import *
+#sys.path.append(os.path.realpath(os.path.normpath(os.path.join('./', delight_dir))))
+#from delight.io import *
+#from delight.utils import *
 
 #################
 ### FONCTIONS ###
@@ -143,7 +143,7 @@ def filter_sigtonoise_entries(d, nsig=5, nbFilt=6):
     return np.sort(indexes)
 
 
-def create_all_inputs(h5file, mag=31.8, snr=5, fileout_lephare='test_DC2_VALID_CAT_IN.in', fileout_delight='test_gal_fluxredshifts.txt'):
+def create_all_inputs(h5file, mag=31.8, snr=5, returnErrors=False, fileout_lephare='test_DC2_VALID_CAT_IN.in', fileout_delight='test_gal_fluxredshifts.txt'):
     h5_file = load_raw_hdf5_data(h5file, groupname='photometry')
 
     ## produce a numpy array
@@ -225,7 +225,8 @@ def create_all_inputs(h5file, mag=31.8, snr=5, fileout_lephare='test_DC2_VALID_C
 
   
     # First: magnitudes only
-    data_mags = np.column_stack((u_mag,g_mag,r_mag,i_mag,z_mag,y_mag))
+    data_mags = np.column_stack((u_mag, g_mag, r_mag, i_mag, z_mag, y_mag))
+    err_mags = np.column_stack((u_err, g_err, r_err, i_err, z_err, y_err))
 
     # Next: colors only
     data_colors = np.column_stack((u_mag-g_mag, g_mag-r_mag, r_mag-i_mag, i_mag-z_mag, z_mag-y_mag))
@@ -240,8 +241,12 @@ def create_all_inputs(h5file, mag=31.8, snr=5, fileout_lephare='test_DC2_VALID_C
     data_z = z
     #print('Magnitudes, colors, Colors+mag, perturbed colors+mag, Spectro-Z for ML ; input CAT file for LEPHARE ; input flux-redshift file for Delight :')
     #return data_mags, data_colors, data_colmag, perturbed_colmag, data_z, fileout_lephare, fileout_delight
-    print('Magnitudes, colors, Colors+mag, Spectro-Z for ML ; input CAT file for LEPHARE ; input flux-redshift file for Delight :')
-    return data_mags, data_colors, data_colmag, data_z, fileout_lephare, fileout_delight
+    if returnErrors:
+        print('Magnitudes, magnitude errors, colors, Colors+mag, Spectro-Z for ML ; input CAT file for LEPHARE ; input flux-redshift file for Delight :')
+        return data_mags, err_mags, data_colors, data_colmag, data_z, fileout_lephare, fileout_delight
+    else:
+        print('Magnitudes, colors, Colors+mag, Spectro-Z for ML ; input CAT file for LEPHARE ; input flux-redshift file for Delight :')
+        return data_mags, data_colors, data_colmag, data_z, fileout_lephare, fileout_delight
 
 # A function that we will call a lot: makes the zphot/zspec plot and calculates key statistics
 # Returns a figure that can then be shown or saved using pyplot methods.
@@ -353,49 +358,62 @@ def plot_random_pdz(z1, pdz1, z2, pdz2, z3, pdz3, z4, pdz4, label1='', label2=''
     return fig
 
 def transposeSEDtoZ(wavelength, intensity, ztarget, zphot=0): ## Flux = integrale{ intensity(lambda)*transmitivity(lambda)*dlambda }
-    lamba0 = wavelength / (1+zphot)
-    int0 = intensity * (1+zphot)
+    lambda0 = wavelength / (1+zphot)
+    int0 = intensity ## * (1+zphot)
     lambdaZ = lambda0 * (1+ztarget)
-    intensityZ = int0 / (1+ztarget)
+    intensityZ = int0 ## / (1+ztarget)
     return lambdaZ, intensityZ, lambda0, int0
 
-def SEDtoFlux(wavelength, intensity, filters): ## compute the flux of each template in each filter
+def SEDtoFlux_obs(wavelength, intensity, filters, ref=None): ## compute the flux of each template in each filter
     ## interpolate / extrapolate filters on the wavelength array
-    interpFilt = np.zeros(len(wavelength), len(filters))
+    interpFilt = np.zeros((len(wavelength), len(filters)))
     fluxes = np.zeros(len(filters))
+    refFact = 1.0
+    if not ref is None:
+        refFact = np.interp(ref, wavelength, intensity, left=0.0, right=0.0) * ref
     for indFilt in np.arange(0, len(filters)):
         ## interpolate / extrapolate filters on the wavelength array
         lambdaF = np.loadtxt(filters[indFilt])[:, 0]
         transmitF = np.loadtxt(filters[indFilt])[:, 1]
+        norm = np.trapz(transmitF/lambdaF, x=lambdaF) ## norm as computed in Delight processSEDs.py
+        #print('Curiosity: norm = {}'.format(norm))
         interpFilt[:, indFilt] = np.interp(wavelength, lambdaF, transmitF, left=0.0, right=0.0)
         ## for each filter : multiply intensity * interpolated filter
-        interpFilt[:, indFilt] *= intensity
+        interpFilt[:, indFilt] *= (intensity * wavelength / refFact)
         ## compute the flux for each filter by integration over wavelength
-        fluxes[indFilt] = np.trapz(interpFilt[:, indFilt], wavelength)
+        fluxes[indFilt] = np.trapz(interpFilt[:, indFilt], wavelength) / norm
     return fluxes
 
 def buildTemplates(SEDs, redshifts, filters, output='magnitude'): ## create a set of templates of size nb of SEDs * nb of redshifts
-    nbSED = len(SED)
+    nbSED = len(SEDs)
     nbZ = len(redshifts)
     nbFilters = len(filters)
     #magOrFlux = np.zeros(nbZ*nbSED, nbFilters)
-    magOrFlux = np.empty_like([])
-    sedCol = np.empty_like([])
+    magOrFlux = np.empty((0, len(filters)))
+    #sedCol = np.empty_like([])
+    sedCol = []
     allZCol = np.empty_like([])
-    for indZ in np.arange(0, nbZ):
+    loc=-1
+    for indZ in np.arange(nbZ):
         ztarget = redshifts[indZ]
-        for indSed in np.arange(0, nbSED):
+        approxDL = np.exp( 30.5 * ztarget**0.04 - 21.7)
+        for indSed in np.arange(nbSED):
+            loc+=1
             wl = np.loadtxt(SEDs[indSed])[:, 0]
             intensity = np.loadtxt(SEDs[indSed])[:, 1]
             wlZ, intZ, wl0, int0 = transposeSEDtoZ(wl, intensity, ztarget, zphot=0)
-            sedCol = np.append(sedCol, SEDs[indSed])
+            #sedCol = np.append(sedCol, [(SEDs[indSed], ztarget)])
+            sedCol.append( (SEDs[indSed], ztarget) )
             allZCol = np.append(allZCol, ztarget)
-            fluxesSed = SEDtoFlux(wlZ, intZ, filters)
+            fluxesSed = SEDtoFlux_obs(wlZ, intZ, filters)
+            fluxesSed /= 4 * np.pi * approxDL**2 # * (1+ztarget)**2
             #magOrFlux[indZ * nbSED + indSed, :] = fluxesSed
-            magOrFlux = np.append(magOrFlux, fluxesSed, axis=0)
+            magOrFlux = np.row_stack((magOrFlux, fluxesSed))
     if output == 'magnitude':
         magOrFlux = - 2.5 * np.log10(magOrFlux)
-    return magOrFlux, allZcol, sedCol
+    sedTupArr = np.empty(len(sedCol), dtype=object)
+    sedTupArr[:] = sedCol
+    return magOrFlux, allZCol, sedTupArr
 
 ### ensuite :
 #seds = ['sed0.txt', 'sed1.txt', ..., 'sedN.txt']
