@@ -91,6 +91,38 @@ def filter_mag_entries(d, mag_filt):
     
     return np.array(idx_u)
 
+def filter_zmin_entries(d, zmin=None):
+    """
+    Filter accoding to redshifts
+    
+    Remove data below zmin
+    """
+    
+    z=d[:,14]
+    
+    if not zmin is None:
+        idx_z = np.where(z<zmin)[0]  
+        #d_del=np.delete(d,idx_u,axis=0)
+        return np.array(idx_z)
+    else:
+        return np.empty_like([], dtype=int)
+    
+def filter_zmax_entries(d, zmax=None):
+    """
+    Filter accoding to redshifts
+    
+    Remove data above zmax
+    """
+    
+    z=d[:,14]
+    
+    if not zmax is None:
+        idx_z = np.where(z>zmax)[0]  
+        #d_del=np.delete(d,idx_u,axis=0)
+        return np.array(idx_z)
+    else:
+        return np.empty_like([], dtype=int)
+
 def mag_to_flux(d, nbFilt=6):
     """  
     Convert magnitudes to fluxes
@@ -143,7 +175,7 @@ def filter_sigtonoise_entries(d, nsig=5, nbFilt=6):
     return np.sort(indexes)
 
 
-def create_all_inputs(h5file, mag=31.8, snr=5, returnErrors=False, fileout_lephare='test_DC2_VALID_CAT_IN.in', fileout_delight='test_gal_fluxredshifts.txt'):
+def create_all_inputs(h5file, mag=31.8, snr=5, zMin=None, zMax=None, returnErrors=False, fileout_lephare='test_DC2_VALID_CAT_IN.in', fileout_delight='test_gal_fluxredshifts.txt'):
     h5_file = load_raw_hdf5_data(h5file, groupname='photometry')
 
     ## produce a numpy array
@@ -167,6 +199,20 @@ def create_all_inputs(h5file, mag=31.8, snr=5, returnErrors=False, fileout_lepha
     print("SNR filter: {} bad indexes, {} left ({} total for check).".format(indexes_bad.shape,\
                                                                              data_f.shape,\
                                                                              indexes_bad.shape[0]+data_f.shape[0]))
+
+    # Get data higher than zMin
+    indexes_zlow=filter_zmin_entries(data_f,zmin=zMin)
+    data_f=np.delete(data_f,indexes_zlow,axis=0)
+    print("Zmin filter: {} bad indexes, {} left ({} total for check).".format(indexes_zlow.shape,\
+                                                                             data_f.shape,\
+                                                                             indexes_zlow.shape[0]+data_f.shape[0]))
+    
+    # Get data lower than zMax
+    indexes_zhigh=filter_zmax_entries(data_f,zmax=zMax)
+    data_f=np.delete(data_f,indexes_zhigh,axis=0)
+    print("Zmax filter: {} bad indexes, {} left ({} total for check).".format(indexes_zhigh.shape,\
+                                                                             data_f.shape,\
+                                                                             indexes_zlow.shape[0]+data_f.shape[0]))
 
     # Generate file for LEPHARE++
     np.savetxt(fileout_lephare, data_f, fmt=['%1i', '%1.6g', '%1.6g',\
