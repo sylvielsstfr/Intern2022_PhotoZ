@@ -435,7 +435,7 @@ def buildTemplates(SEDs, redshifts, filters, output='magnitude'): ## create a se
     nbZ = len(redshifts)
     nbFilters = len(filters)
     #magOrFlux = np.zeros(nbZ*nbSED, nbFilters)
-    magOrFlux = np.empty((0, len(filters)))
+    magOrFlux = np.empty((0, nbFilters))
     #sedCol = np.empty_like([])
     sedCol = []
     allZCol = np.empty_like([])
@@ -449,7 +449,8 @@ def buildTemplates(SEDs, redshifts, filters, output='magnitude'): ## create a se
             intensity = np.loadtxt(SEDs[indSed])[:, 1]
             wlZ, intZ, wl0, int0 = transposeSEDtoZ(wl, intensity, ztarget, zphot=0)
             #sedCol = np.append(sedCol, [(SEDs[indSed], ztarget)])
-            sedCol.append( (SEDs[indSed], ztarget) )
+            #sedCol.append( (SEDs[indSed], ztarget) )
+            sedCol.append( (indSed, ztarget) )
             allZCol = np.append(allZCol, ztarget)
             fluxesSed = SEDtoFlux_obs(wlZ, intZ, filters)
             fluxesSed /= 4 * np.pi * approxDL**2 # * (1+ztarget)**2
@@ -460,6 +461,21 @@ def buildTemplates(SEDs, redshifts, filters, output='magnitude'): ## create a se
     sedTupArr = np.empty(len(sedCol), dtype=object)
     sedTupArr[:] = sedCol
     return magOrFlux, allZCol, sedTupArr
+
+def sedColors(SEDs, filters):
+    nbSED = len(SEDs)
+    nbFilters = len(filters)
+    nbColors = nbFilters-1
+    colorsArray = np.empty((nbSED, nbColors))
+    for indSed in np.arange(nbSED):
+        wavelength = np.loadtxt(SEDs[indSed])[:, 0]
+        luminosity = np.loadtxt(SEDs[indSed])[:, 1]
+        fluxesSed = SEDtoFlux_obs(wavelength, luminosity, filters)
+        for indCol in np.arange(nbColors):
+            color = - 2.5 * ( np.log10(fluxesSed[indCol])\
+                             - np.log10(fluxesSed[indCol+1]) )
+            colorsArray[indSed, indCol] = color
+    return colorsArray
 
 ### ensuite :
 #seds = ['sed0.txt', 'sed1.txt', ..., 'sedN.txt']
