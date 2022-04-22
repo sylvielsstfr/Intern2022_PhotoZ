@@ -32,6 +32,45 @@ from sklearn.model_selection import cross_val_predict
 #################
 ### FONCTIONS ###
 #################
+class sigma_rand():
+    """
+    Eq. (3.2) from LSST Science Book
+    """
+    def __call__(self, m, m5=None, tvis=30, X=1.2, band='u'):
+        if band == 'u':
+            Cm, msky, theta, km, gamma =\
+            23.60, 21.8, 0.77, 0.48, 0.037
+        elif band == 'g':
+            Cm, msky, theta, km, gamma =\
+            24.57, 22.0, 0.73, 0.21, 0.038
+        elif band == 'r':
+            Cm, msky, theta, km, gamma =\
+            24.57, 21.3, 0.70, 0.10, 0.039
+        elif band == 'i':
+            Cm, msky, theta, km, gamma =\
+            24.47, 20.0, 0.67, 0.07, 0.039
+        elif band == 'z':
+            Cm, msky, theta, km, gamma =\
+            24.19, 19.1, 0.65, 0.06, 0.040
+        elif band == 'y':
+            Cm, msky, theta, km, gamma =\
+            23.74, 17.5, 0.63, 0.06, 0.040
+            
+        if m5 is None:
+            m5 = Cm + 0.50*(msky - 21) + 2.5*np.log10(0.7/theta) + 1.25*np.log10(tvis/30) - km*(X - 1)
+        else:
+            tvis =  30 * 10**(( m5 - Cm - 0.50*(msky - 21) - 2.5*np.log10(0.7/theta) + km*(X - 1) ) / 1.25)
+        
+        x = 10 ** (0.4*(m - m5))
+        sigRand2 = (0.04 - gamma)*x + gamma * x**2
+        return np.sqrt(sigRand2), m5, tvis
+
+    def __str__(self):
+        return str(self.__dict__)
+
+    def __eq__(self, other):
+        return self.__dict__ == other.__dict__
+
 def load_raw_hdf5_data(infile, groupname='None'):
     """
     read in h5py hdf5 data, return a dictionary of all of the keys
@@ -174,6 +213,48 @@ def filter_sigtonoise_entries(d, nsig=5, nbFilt=6):
     indexes=np.unique(indexes)
     return np.sort(indexes)
 
+def sigma1(arrayMag, strBand, m5=None, tvis=30, X=1.2, sig_sys=0.003):
+    sig_rand = sigma_rand()
+    arraySig = np.array([])
+    for m in arrayMag:
+        sigRand, fiveSigDepth, visDuration = sig_rand(m, m5=m5, tvis=tvis, X=X, band=strBand)
+        arraySig = np.append(arraySig, np.sqrt(sigRand**2 + sig_sys**2))
+    print('5-sigma depth is: {} mag,\nCumulated visit duration is: {} s'.format(fiveSigDepth, visDuration))
+    return arraySig
+
+def find_m5(mags, errs, sigrand=0.2):
+    mags = np.asarray(mags)
+    errs = np.asarray(errs)
+    idx = np.nanargmin( np.abs(errs - sigrand) )
+    return mags[idx]
+
+def filter_m5_entries(d, nbFilt=6):
+    """
+    """ 
+    
+    indexes=[]
+    #indexes=np.array(indexes,dtype=np.int)
+    indexes=np.array(indexes,dtype=int)
+    
+    for idx in np.arange(nbFilt):
+        mag = d[:,1+2*idx]
+        errMag=d[:,2+2*idx]  # error in M_AB
+        m5 = find_m5(mag, errMag)
+        bad_indexes=np.where(mag > m5)[0]
+        indexes=np.concatenate((indexes,bad_indexes))
+    
+    indexes=np.unique(indexes)
+    return np.sort(indexes)    
+
+def generate_magnitudes(N, k=0.6, m_min=20, m_max=25): ## from https://www.astroml.org/book_figures/chapter5/fig_lutz_kelker.html
+    """
+    generate magnitudes from a distribution with
+      p(m) ~ 10^(k m) = exp(k*m*ln(10))
+    """
+    klog10 = k * np.log(10)
+    Pmin = np.exp(klog10 * m_min)
+    Pmax = np.exp(klog10 * m_max)
+    return (1. / klog10) * np.log(Pmin + (Pmax - Pmin) * np.random.random(N))
 
 def create_all_inputs(h5file, mag=31.8, snr=5, zMin=None, zMax=None, returnErrors=False, fileout_lephare='test_DC2_VALID_CAT_IN.in', fileout_delight='test_gal_fluxredshifts.txt'):
     h5_file = load_raw_hdf5_data(h5file, groupname='photometry')
@@ -430,7 +511,7 @@ def SEDtoFlux_obs(wavelength, intensity, filters, ref=None): ## compute the flux
         fluxes[indFilt] = np.trapz(interpFilt[:, indFilt], wavelength) / norm
     return fluxes
 
-def buildTemplates(SEDs, redshifts, filters, output='magnitude'): ## create a set of templates of size nb of SEDs * nb of redshifts
+def buildTemplates_tuples(SEDs, redshifts, filters, output='magnitude'): ## create a set of templates of size nb of SEDs * nb of redshifts
     nbSED = len(SEDs)
     nbZ = len(redshifts)
     nbFilters = len(filters)
@@ -440,13 +521,13 @@ def buildTemplates(SEDs, redshifts, filters, output='magnitude'): ## create a se
     sedCol = []
     allZCol = np.empty_like([])
     loc=-1
-    for indZ in np.arange(nbZ):
-        ztarget = redshifts[indZ]
-        approxDL = np.exp( 30.5 * ztarget**0.04 - 21.7)
-        for indSed in np.arange(nbSED):
+    for indSed in np.arange(nbSED):
+        wl = np.loadtxt(SEDs[indSed])[:, 0]
+        intensity = np.loadtxt(SEDs[indSed])[:, 1]
+        for indZ in np.arange(nbZ):
             loc+=1
-            wl = np.loadtxt(SEDs[indSed])[:, 0]
-            intensity = np.loadtxt(SEDs[indSed])[:, 1]
+            ztarget = redshifts[indZ]
+            approxDL = np.exp( 30.5 * ztarget**0.04 - 21.7)
             wlZ, intZ, wl0, int0 = transposeSEDtoZ(wl, intensity, ztarget, zphot=0)
             #sedCol = np.append(sedCol, [(SEDs[indSed], ztarget)])
             #sedCol.append( (SEDs[indSed], ztarget) )
@@ -461,6 +542,58 @@ def buildTemplates(SEDs, redshifts, filters, output='magnitude'): ## create a se
     sedTupArr = np.empty(len(sedCol), dtype=object)
     sedTupArr[:] = sedCol
     return magOrFlux, allZCol, sedTupArr
+
+def buildTemplates_indices(SEDs, redshifts, filters, output='magnitude'): ## create a set of templates of size nb of SEDs * nb of redshifts
+    nbSED = len(SEDs)
+    nbZ = len(redshifts)
+    nbFilters = len(filters)
+    magOrFlux = np.empty((0, nbFilters))
+    sedCol = np.empty_like([], dtype=int)
+    allZCol = np.empty_like([])
+    loc=-1
+    for indSed in np.arange(nbSED):
+        wl = np.loadtxt(SEDs[indSed])[:, 0]
+        intensity = np.loadtxt(SEDs[indSed])[:, 1]
+        for indZ in np.arange(nbZ):
+            loc+=1
+            ztarget = redshifts[indZ]
+            approxDL = np.exp( 30.5 * ztarget**0.04 - 21.7)
+            wlZ, intZ, wl0, int0 = transposeSEDtoZ(wl, intensity, ztarget, zphot=0)
+            sedCol = np.append(sedCol, indSed)
+            allZCol = np.append(allZCol, ztarget)
+            fluxesSed = SEDtoFlux_obs(wlZ, intZ, filters)
+            fluxesSed /= 4 * np.pi * approxDL**2 # * (1+ztarget)**2
+            magOrFlux = np.row_stack((magOrFlux, fluxesSed))
+    if output == 'magnitude':
+        magOrFlux = - 2.5 * np.log10(magOrFlux)
+    return magOrFlux, allZCol, sedCol
+
+def buildTemplates_labels(SEDs, redshifts, filters, output='magnitude'): ## create a set of templates of size nb of SEDs * nb of redshifts
+    nbSED = len(SEDs)
+    nbZ = len(redshifts)
+    nbFilters = len(filters)
+    magOrFlux = np.empty((0, nbFilters))
+    sedCol = np.empty_like([], dtype=str)
+    allZCol = np.empty_like([])
+    loc=-1
+    for indSed in np.arange(nbSED):
+        wl = np.loadtxt(SEDs[indSed])[:, 0]
+        intensity = np.loadtxt(SEDs[indSed])[:, 1]
+        sedname = SEDs[indSed].split('/')[-1]
+        sedname = sedname.split('.')[0]
+        for indZ in np.arange(nbZ):
+            loc+=1
+            ztarget = redshifts[indZ]
+            approxDL = np.exp( 30.5 * ztarget**0.04 - 21.7)
+            wlZ, intZ, wl0, int0 = transposeSEDtoZ(wl, intensity, ztarget, zphot=0)
+            sedCol = np.append(sedCol, sedname)
+            allZCol = np.append(allZCol, ztarget)
+            fluxesSed = SEDtoFlux_obs(wlZ, intZ, filters)
+            fluxesSed /= 4 * np.pi * approxDL**2 # * (1+ztarget)**2
+            magOrFlux = np.row_stack((magOrFlux, fluxesSed))
+    if output == 'magnitude':
+        magOrFlux = - 2.5 * np.log10(magOrFlux)
+    return magOrFlux, allZCol, sedCol
 
 def sedColors(SEDs, filters):
     nbSED = len(SEDs)
