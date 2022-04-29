@@ -11,3 +11,6 @@
 [submodule "LEPHARELSST"]
 	path = LEPHARELSST
 	url = git@github.com:JospehCeh/LEPHARELSST.git
+[submodule "Photoz-tools"]
+	path = Photoz-tools
+	url = git@github.com:sylvielsstfr/Photoz-tools.git
